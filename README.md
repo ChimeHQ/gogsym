@@ -1,6 +1,12 @@
+[![Github CI](https://github.com/stacksift/gogsym/workflows/CI/badge.svg)](https://github.com/stacksift/gogsym/actions)
+
 # gogsym
 
-Go library for reading GSYM files
+Go library for reading GSYM files.
+
+GSYM is a binary file format useful for performing symbolication. It is much smaller and more efficient than using a dSYM.
+
+A format definition can be derived from the LLVM [headers](https://github.com/llvm/llvm-project/tree/main/llvm/include/llvm/DebugInfo/GSYM).
 
 ## Suggestions or Feedback
 
