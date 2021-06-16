@@ -7,14 +7,14 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestReadInlineAppGSYM(t *testing.T) {
+func TestHeaderParsing(t *testing.T) {
 	f, err := os.Open("testdata/inlineapp.gsym")
 	defer f.Close()
 	if assert.Nil(t, err) == false {
 		return
 	}
 
-	g, err := NewGsym(f)
+	g, err := NewGsymWithReader(f)
 	if assert.Nil(t, err) == false {
 		return
 	}
@@ -28,4 +28,35 @@ func TestReadInlineAppGSYM(t *testing.T) {
 	assert.Equal(t, uint32(0x0000008c), g.Header.StrtabOffset)
 	assert.Equal(t, uint32(0x000001de), g.Header.StrtabSize)
 	assert.Equal(t, "6245042154203af087ca010fc8d6ceba", g.Header.UUIDString())
+
+	assert.Equal(t, int64(48), g.Header.Size())
+}
+
+func TestGetAddressIndex(t *testing.T) {
+	f, err := os.Open("testdata/inlineapp.gsym")
+	defer f.Close()
+	if assert.Nil(t, err) == false {
+		return
+	}
+
+	g, err := NewGsymWithReader(f)
+	if assert.Nil(t, err) == false {
+		return
+	}
+
+	idx, err := g.GetTextRelativeAddressIndex(0x308c)
+	assert.Nil(t, err)
+	assert.Equal(t, 0, idx)
+
+	idx, err = g.GetTextRelativeAddressIndex(0x308d)
+	assert.Nil(t, err)
+	assert.Equal(t, 1, idx)
+
+	idx, err = g.GetTextRelativeAddressIndex(0x32b4)
+	assert.Nil(t, err)
+	assert.Equal(t, 7, idx)
+
+	idx, err = g.GetTextRelativeAddressIndex(0x32b5)
+	assert.Equal(t, ErrAddressNotFound, err)
+	assert.Equal(t, 0, idx)
 }

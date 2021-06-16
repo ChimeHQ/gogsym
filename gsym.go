@@ -1,17 +1,25 @@
 package gogsym
 
 import (
-	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
+	"sort"
 )
 
 const GSYM_MAGIC uint32 = 0x4753594d
 const GSYM_CIGAM uint32 = 0x4d595347
 const GSYM_MAX_UUID_SIZE = 20
+const GSYM_HEADER_SIZE = 28 + GSYM_MAX_UUID_SIZE
 
 var ErrUnsupportedVersion = errors.New("Unsupported Version")
+var ErrAddressOutOfRange = errors.New("Address out of range")
+var ErrUUIDSizeOutOfRange = errors.New("UUID size out of range")
+var ErrAddressSizeOutOfrange = errors.New("Address size out of range")
+var ErrAddressNotFound = errors.New("Address not found")
+
+type Address uint64
 
 type Header struct {
 	Magic        uint32
@@ -25,6 +33,75 @@ type Header struct {
 	UUID         [GSYM_MAX_UUID_SIZE]byte
 }
 
+func (h Header) Size() int64 {
+	return int64(GSYM_HEADER_SIZE)
+}
+
+func newHeader(p parser) (Header, error) {
+	h := Header{}
+
+	var err error
+
+	h.Magic, err = p.readUint32(0)
+	if err != nil {
+		return h, err
+	}
+
+	if h.Magic == GSYM_CIGAM {
+		p.flipOrder()
+	}
+
+	h.Version, err = p.readUint16(4)
+	if err != nil {
+		return h, err
+	}
+
+	if h.Version != uint16(1) {
+		return h, ErrUnsupportedVersion
+	}
+
+	h.AddrOffSize, err = p.readUint8(6)
+	if err != nil {
+		return h, err
+	}
+
+	h.UUIDSize, err = p.readUint8(7)
+	if err != nil {
+		return h, err
+	}
+
+	if h.UUIDSize > GSYM_MAX_UUID_SIZE {
+		return h, ErrUUIDSizeOutOfRange
+	}
+
+	h.BaseAddress, err = p.readUint64(8)
+	if err != nil {
+		return h, err
+	}
+
+	h.NumAddresses, err = p.readUint32(16)
+	if err != nil {
+		return h, err
+	}
+
+	h.StrtabOffset, err = p.readUint32(20)
+	if err != nil {
+		return h, err
+	}
+
+	h.StrtabSize, err = p.readUint32(24)
+	if err != nil {
+		return h, err
+	}
+
+	n, err := p.r.ReadAt(h.UUID[0:h.UUIDSize], 28)
+	if n != int(h.UUIDSize) {
+		return h, fmt.Errorf("Expected %d UUIDS bytes, got %d", h.UUIDSize, n)
+	}
+
+	return h, nil
+}
+
 func (h Header) UUIDBytes() []byte {
 	return h.UUID[0:h.UUIDSize]
 }
@@ -34,70 +111,74 @@ func (h Header) UUIDString() string {
 }
 
 type Gsym struct {
-	order  binary.ByteOrder
+	parser parser
 	Header Header
 }
 
-func NewGsym(r io.Reader) (Gsym, error) {
+func NewGsymWithReader(r io.ReaderAt) (Gsym, error) {
+	p := newParser(r)
+
 	g := Gsym{
-		order:  binary.LittleEndian,
+		parser: p,
 		Header: Header{},
 	}
 
-	err := binary.Read(r, g.order, &g.Header.Magic)
+	header, err := newHeader(p)
 	if err != nil {
 		return g, err
 	}
 
-	if g.Header.Magic == GSYM_CIGAM {
-		g.order = binary.BigEndian
-	}
-
-	err = binary.Read(r, g.order, &g.Header.Version)
-	if err != nil {
-		return g, err
-	}
-
-	if g.Header.Version != uint16(1) {
-		return g, ErrUnsupportedVersion
-	}
-
-	err = binary.Read(r, g.order, &g.Header.AddrOffSize)
-	if err != nil {
-		return g, err
-	}
-
-	err = binary.Read(r, g.order, &g.Header.UUIDSize)
-	if err != nil {
-		return g, err
-	}
-
-	err = binary.Read(r, g.order, &g.Header.BaseAddress)
-	if err != nil {
-		return g, err
-	}
-
-	err = binary.Read(r, g.order, &g.Header.NumAddresses)
-	if err != nil {
-		return g, err
-	}
-
-	err = binary.Read(r, g.order, &g.Header.StrtabOffset)
-	if err != nil {
-		return g, err
-	}
-
-	err = binary.Read(r, g.order, &g.Header.StrtabSize)
-	if err != nil {
-		return g, err
-	}
-
-	for i := 0; i < int(g.Header.UUIDSize); i++ {
-		err = binary.Read(r, g.order, &g.Header.UUID[i])
-		if err != nil {
-			return g, err
-		}
-	}
+	g.Header = header
 
 	return g, nil
+}
+
+func (g Gsym) ReadAddressEntry(idx int) (uint64, error) {
+	offset := int64(idx)*int64(g.Header.AddrOffSize) + int64(g.Header.Size())
+
+	switch g.Header.AddrOffSize {
+	case 1:
+		v8, err := g.parser.readUint8(offset)
+
+		return uint64(v8), err
+	case 2:
+		v16, err := g.parser.readUint16(offset)
+
+		return uint64(v16), err
+	case 4:
+		v32, err := g.parser.readUint32(offset)
+
+		return uint64(v32), err
+	case 8:
+		v64, err := g.parser.readUint64(offset)
+
+		return uint64(v64), err
+	}
+
+	return uint64(0), ErrAddressSizeOutOfrange
+}
+
+func (g Gsym) GetTextRelativeAddressIndex(addr uint64) (int, error) {
+	return g.GetAddressIndex(addr + g.Header.BaseAddress)
+}
+
+func (g Gsym) GetAddressIndex(addr uint64) (int, error) {
+	if addr < g.Header.BaseAddress {
+		return 0, ErrAddressOutOfRange
+	}
+
+	relAddr := addr - g.Header.BaseAddress
+	count := int(g.Header.NumAddresses)
+
+	idx := sort.Search(count, func(i int) bool {
+		entryAddr, _ := g.ReadAddressEntry(i)
+
+		return entryAddr >= relAddr
+	})
+
+	if idx >= count {
+		return 0, ErrAddressNotFound
+	}
+
+	return idx, nil
 }
