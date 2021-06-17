@@ -44,11 +44,19 @@ func TestGetAddressIndex(t *testing.T) {
 		return
 	}
 
-	idx, err := g.GetTextRelativeAddressIndex(0x308c)
+	idx, err := g.GetTextRelativeAddressIndex(0x308b)
+	assert.Equal(t, ErrAddressNotFound, err)
+	assert.Equal(t, 0, idx)
+
+	idx, err = g.GetTextRelativeAddressIndex(0x308c)
 	assert.Nil(t, err)
 	assert.Equal(t, 0, idx)
 
 	idx, err = g.GetTextRelativeAddressIndex(0x308d)
+	assert.Nil(t, err)
+	assert.Equal(t, 0, idx)
+
+	idx, err = g.GetTextRelativeAddressIndex(0x30d4)
 	assert.Nil(t, err)
 	assert.Equal(t, 1, idx)
 
@@ -57,6 +65,41 @@ func TestGetAddressIndex(t *testing.T) {
 	assert.Equal(t, 7, idx)
 
 	idx, err = g.GetTextRelativeAddressIndex(0x32b5)
-	assert.Equal(t, ErrAddressNotFound, err)
-	assert.Equal(t, 0, idx)
+	assert.Nil(t, err)
+	assert.Equal(t, 7, idx)
+}
+
+func TestGetAddressInfo(t *testing.T) {
+	f, err := os.Open("testdata/inlineapp.gsym")
+	defer f.Close()
+	if assert.Nil(t, err) == false {
+		return
+	}
+
+	g, err := NewGsymWithReader(f)
+	if assert.Nil(t, err) == false {
+		return
+	}
+
+	off, err := g.GetAddressInfoOffset(7)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(0x410), off)
+}
+
+func TestLookupAddress(t *testing.T) {
+	f, err := os.Open("testdata/inlineapp.gsym")
+	defer f.Close()
+	if assert.Nil(t, err) == false {
+		return
+	}
+
+	g, err := NewGsymWithReader(f)
+	if assert.Nil(t, err) == false {
+		return
+	}
+
+	_, err = g.LookupTextRelativeAddress(0x32b3)
+	if assert.Nil(t, err) == false {
+		return
+	}
 }
