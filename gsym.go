@@ -213,10 +213,21 @@ func (g Gsym) GetAddressInfoOffset(index int) (int64, error) {
 type LookupResult struct {
 }
 
-func (g Gsym) LookupTextRelativeAddress(addr uint64) (LookupResult, error) {
+const (
+	InfoTypeEndOfList uint32 = 0
+	InfoTypeLineTable uint32 = 1
+	InfoTypeInline    uint32 = 2
+)
+
+func (g Gsym) LookupTextRelativeAddress(relAddr uint64) (LookupResult, error) {
 	lr := LookupResult{}
 
-	addrIdx, err := g.GetTextRelativeAddressIndex(addr)
+	addrIdx, err := g.GetTextRelativeAddressIndex(relAddr)
+	if err != nil {
+		return lr, err
+	}
+
+	entryAddr, err := g.ReadAddressEntry(addrIdx)
 	if err != nil {
 		return lr, err
 	}
@@ -226,7 +237,43 @@ func (g Gsym) LookupTextRelativeAddress(addr uint64) (LookupResult, error) {
 		return lr, err
 	}
 
-	fmt.Printf("0x%x => %d, 0x%x\n", addr, addrIdx, addrInfoOffset)
+	fnSize, err := g.parser.readUint32(addrInfoOffset)
+	if err != nil {
+		return lr, err
+	}
+
+	// check bounds
+	if relAddr < entryAddr || relAddr > entryAddr+uint64(fnSize) {
+		return lr, ErrAddressNotFound
+	}
+
+	offset := addrInfoOffset + 4
+	fnNameOffset, err := g.parser.readUint32(offset)
+	if err != nil {
+		return lr, err
+	}
+
+	offset += 4
+
+	name, err := g.GetString(int64(fnNameOffset))
+	if err != nil {
+		return lr, err
+	}
+
+	fmt.Printf("0x%x => %s\n", relAddr, name)
+
+	infoType, err := g.parser.readUint32(offset)
+	if err != nil {
+		return lr, err
+	}
+
+	fmt.Printf("0x%x => 0x%x\n", relAddr, infoType)
 
 	return lr, nil
+}
+
+func (g Gsym) GetString(offset int64) (string, error) {
+	strOffset := int64(g.Header.StrtabOffset) + offset
+
+	return g.parser.readNullTerminatedUTF8String(strOffset)
 }

@@ -84,3 +84,27 @@ func (p parser) readUint64(offset int64) (uint64, error) {
 
 	return p.order.Uint64(p.buf64), nil
 }
+
+func (p parser) readNullTerminatedUTF8String(offset int64) (string, error) {
+	data := []byte{}
+	count := int64(0)
+
+	for {
+		n, err := p.r.ReadAt(p.buf8, offset+count)
+		if err != nil {
+			return "", err
+		}
+		if n != 1 {
+			return "", ErrReadWrongSize
+		}
+
+		if p.buf8[0] == 0 {
+			break
+		}
+
+		count += 1
+		data = append(data, p.buf8[0])
+	}
+
+	return string(data), nil
+}
