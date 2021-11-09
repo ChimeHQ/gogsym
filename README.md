@@ -1,4 +1,4 @@
-[![Github CI](https://github.com/stacksift/gogsym/workflows/CI/badge.svg)](https://github.com/stacksift/gogsym/actions)
+[![Github CI](https://github.com/ChimeHQ/gogsym/workflows/CI/badge.svg)](https://github.com/ChimeHQ/gogsym/actions)
 
 # gogsym
 
@@ -10,6 +10,6 @@ A format definition can be derived from the LLVM [headers](https://github.com/ll
 
 ## Suggestions or Feedback
 
-We'd love to hear from you! Get in touch via [twitter](https://twitter.com/stacksift), an issue, or a pull request.
+We'd love to hear from you! Get in touch via [twitter](https://twitter.com/ChimeHQ), an issue, or a pull request.
 
 Please note that this project is released with a [Contributor Code of Conduct](CODE_OF_CONDUCT.md). By participating in this project you agree to abide by its terms.
