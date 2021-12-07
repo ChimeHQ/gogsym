@@ -6,7 +6,15 @@ Go library for reading GSYM files.
 
 GSYM is a binary file format useful for performing symbolication. It is much smaller and more efficient than using a dSYM.
 
-A format definition can be derived from the LLVM [headers](https://github.com/llvm/llvm-project/tree/main/llvm/include/llvm/DebugInfo/GSYM).
+A format definition can be derived from the LLVM [headers](https://github.com/llvm/llvm-project/tree/main/llvm/include/llvm/DebugInfo/GSYM) and [sources](https://github.com/llvm/llvm-project/tree/main/llvm/lib/DebugInfo/GSYM).
+
+# llvm-gsymutil
+
+`llvm-gsymutil` can create and read gsym files. You can build it from the LLVM sources. It takes a long time to build.
+
+    cmake -DLLVM_ENABLE_PROJECTS="llvm-gsymutil" llvm
+    make llvm-gsymutil
+    bin/llvm-gsymutil -h
 
 ## Suggestions or Feedback
 

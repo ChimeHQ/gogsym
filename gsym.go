@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"sort"
+
+	"github.com/chimehq/binarycursor"
 )
 
 const GSYM_MAGIC uint32 = 0x4753594d
@@ -18,8 +20,6 @@ var ErrAddressOutOfRange = errors.New("Address out of range")
 var ErrUUIDSizeOutOfRange = errors.New("UUID size out of range")
 var ErrAddressSizeOutOfrange = errors.New("Address size out of range")
 var ErrAddressNotFound = errors.New("Address not found")
-
-type Address uint64
 
 type Header struct {
 	Magic        uint32
@@ -37,21 +37,21 @@ func (h Header) Size() int64 {
 	return int64(GSYM_HEADER_SIZE)
 }
 
-func newHeader(p parser) (Header, error) {
+func newHeader(bc binarycursor.BinaryCursor) (Header, error) {
 	h := Header{}
 
 	var err error
 
-	h.Magic, err = p.readUint32(0)
+	h.Magic, err = bc.ReadUint32()
 	if err != nil {
 		return h, err
 	}
 
 	if h.Magic == GSYM_CIGAM {
-		p.flipOrder()
+		bc.FlipOrder()
 	}
 
-	h.Version, err = p.readUint16(4)
+	h.Version, err = bc.ReadUint16()
 	if err != nil {
 		return h, err
 	}
@@ -60,12 +60,12 @@ func newHeader(p parser) (Header, error) {
 		return h, ErrUnsupportedVersion
 	}
 
-	h.AddrOffSize, err = p.readUint8(6)
+	h.AddrOffSize, err = bc.ReadUint8()
 	if err != nil {
 		return h, err
 	}
 
-	h.UUIDSize, err = p.readUint8(7)
+	h.UUIDSize, err = bc.ReadUint8()
 	if err != nil {
 		return h, err
 	}
@@ -74,27 +74,27 @@ func newHeader(p parser) (Header, error) {
 		return h, ErrUUIDSizeOutOfRange
 	}
 
-	h.BaseAddress, err = p.readUint64(8)
+	h.BaseAddress, err = bc.ReadUint64()
 	if err != nil {
 		return h, err
 	}
 
-	h.NumAddresses, err = p.readUint32(16)
+	h.NumAddresses, err = bc.ReadUint32()
 	if err != nil {
 		return h, err
 	}
 
-	h.StrtabOffset, err = p.readUint32(20)
+	h.StrtabOffset, err = bc.ReadUint32()
 	if err != nil {
 		return h, err
 	}
 
-	h.StrtabSize, err = p.readUint32(24)
+	h.StrtabSize, err = bc.ReadUint32()
 	if err != nil {
 		return h, err
 	}
 
-	n, err := p.r.ReadAt(h.UUID[0:h.UUIDSize], 28)
+	n, err := bc.Read(h.UUID[0:h.UUIDSize])
 	if n != int(h.UUIDSize) {
 		return h, fmt.Errorf("Expected %d UUIDS bytes, got %d", h.UUIDSize, n)
 	}
@@ -111,19 +111,21 @@ func (h Header) UUIDString() string {
 }
 
 type Gsym struct {
-	parser parser
-	Header Header
+	readerAt io.ReaderAt
+	cursor   binarycursor.BinaryCursor
+	Header   Header
 }
 
 func NewGsymWithReader(r io.ReaderAt) (Gsym, error) {
-	p := newParser(r)
+	bc := binarycursor.NewBinaryReaderAtCursor(r, 0)
 
 	g := Gsym{
-		parser: p,
-		Header: Header{},
+		readerAt: r,
+		cursor:   bc,
+		Header:   Header{},
 	}
 
-	header, err := newHeader(p)
+	header, err := newHeader(bc)
 	if err != nil {
 		return g, err
 	}
@@ -133,30 +135,37 @@ func NewGsymWithReader(r io.ReaderAt) (Gsym, error) {
 	return g, nil
 }
 
+func (g Gsym) cursorAt(offset int64) binarycursor.BinaryCursor {
+	c := binarycursor.NewBinaryReaderAtCursor(g.readerAt, offset)
+
+	c.SetOrder(g.cursor.Order())
+
+	return c
+}
+
 func (g Gsym) AddressTableOffset() int64 {
 	return int64(g.Header.Size())
 }
 
 func (g Gsym) ReadAddressEntry(idx int) (uint64, error) {
 	offset := int64(idx)*int64(g.Header.AddrOffSize) + g.AddressTableOffset()
+	cursor := g.cursorAt(offset)
 
 	switch g.Header.AddrOffSize {
 	case 1:
-		v8, err := g.parser.readUint8(offset)
+		v8, err := cursor.ReadUint8()
 
 		return uint64(v8), err
 	case 2:
-		v16, err := g.parser.readUint16(offset)
+		v16, err := cursor.ReadUint16()
 
 		return uint64(v16), err
 	case 4:
-		v32, err := g.parser.readUint32(offset)
+		v32, err := cursor.ReadUint32()
 
 		return uint64(v32), err
 	case 8:
-		v64, err := g.parser.readUint64(offset)
-
-		return uint64(v64), err
+		return cursor.ReadUint64()
 	}
 
 	return uint64(0), ErrAddressSizeOutOfrange
@@ -205,75 +214,70 @@ func (g Gsym) AddressInfoTableOffset() int64 {
 func (g Gsym) GetAddressInfoOffset(index int) (int64, error) {
 	offset := g.AddressInfoTableOffset() + int64(index*4)
 
-	value, err := g.parser.readUint32(offset)
+	c := g.cursorAt(offset)
+
+	value, err := c.ReadUint32()
 
 	return int64(value), err
-}
-
-type LookupResult struct {
-}
-
-const (
-	InfoTypeEndOfList uint32 = 0
-	InfoTypeLineTable uint32 = 1
-	InfoTypeInline    uint32 = 2
-)
-
-func (g Gsym) LookupTextRelativeAddress(relAddr uint64) (LookupResult, error) {
-	lr := LookupResult{}
-
-	addrIdx, err := g.GetTextRelativeAddressIndex(relAddr)
-	if err != nil {
-		return lr, err
-	}
-
-	entryAddr, err := g.ReadAddressEntry(addrIdx)
-	if err != nil {
-		return lr, err
-	}
-
-	addrInfoOffset, err := g.GetAddressInfoOffset(addrIdx)
-	if err != nil {
-		return lr, err
-	}
-
-	fnSize, err := g.parser.readUint32(addrInfoOffset)
-	if err != nil {
-		return lr, err
-	}
-
-	// check bounds
-	if relAddr < entryAddr || relAddr > entryAddr+uint64(fnSize) {
-		return lr, ErrAddressNotFound
-	}
-
-	offset := addrInfoOffset + 4
-	fnNameOffset, err := g.parser.readUint32(offset)
-	if err != nil {
-		return lr, err
-	}
-
-	offset += 4
-
-	name, err := g.GetString(int64(fnNameOffset))
-	if err != nil {
-		return lr, err
-	}
-
-	fmt.Printf("0x%x => %s\n", relAddr, name)
-
-	infoType, err := g.parser.readUint32(offset)
-	if err != nil {
-		return lr, err
-	}
-
-	fmt.Printf("0x%x => 0x%x\n", relAddr, infoType)
-
-	return lr, nil
 }
 
 func (g Gsym) GetString(offset int64) (string, error) {
 	strOffset := int64(g.Header.StrtabOffset) + offset
 
-	return g.parser.readNullTerminatedUTF8String(strOffset)
+	c := g.cursorAt(strOffset)
+
+	return c.ReadNullTerminatedUTF8String()
+}
+
+type FileEntry struct {
+	DirStrOffset  uint32
+	BaseStrOffset uint32
+}
+
+func (g Gsym) GetFileEntry(index uint32) (FileEntry, error) {
+	offset := g.AddressInfoTableOffset() + int64(g.Header.NumAddresses*4)
+
+	// offset: uint32 count
+	// offset + 4: uint32(0), uint32(0)
+
+	// and, every entry is 2 uint32s
+
+	offset += 4 + int64(index)*4*2
+
+	c := g.cursorAt(offset)
+
+	entry := FileEntry{}
+	var err error = nil
+
+	entry.DirStrOffset, err = c.ReadUint32()
+	if err != nil {
+		return entry, err
+	}
+
+	entry.BaseStrOffset, err = c.ReadUint32()
+
+	return entry, err
+}
+
+func (g Gsym) GetFile(index uint32) (string, error) {
+	if index == 0 {
+		return "", nil
+	}
+
+	entry, err := g.GetFileEntry(index)
+	if err != nil {
+		return "", err
+	}
+
+	dir, err := g.GetString(int64(entry.DirStrOffset))
+	if err != nil {
+		return "", err
+	}
+
+	base, err := g.GetString(int64(entry.BaseStrOffset))
+	if err != nil {
+		return "", err
+	}
+
+	return dir + "/" + base, nil
 }

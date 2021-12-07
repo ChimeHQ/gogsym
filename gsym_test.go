@@ -98,8 +98,54 @@ func TestLookupAddress(t *testing.T) {
 		return
 	}
 
-	_, err = g.LookupTextRelativeAddress(0x32b3)
+	lr, err := g.LookupTextRelativeAddress(0x3177)
 	if assert.Nil(t, err) == false {
 		return
 	}
+
+	assert.Equal(t, uint64(0x3177), lr.Address)
+	assert.Equal(t, uint64(0x314c), lr.StartAddr)
+	assert.Equal(t, uint64(0x38), lr.Size)
+	assert.Equal(t, "main", lr.Name)
+
+	if assert.Equal(t, 1, len(lr.Locations)) == false {
+		return
+	}
+
+	assert.Equal(t, "main", lr.Locations[0].Name)
+	assert.Equal(t, uint32(14), lr.Locations[0].Line)
+	assert.Equal(t, "/Users/matt/Desktop/InlineTest/InlineTest/main.m", lr.Locations[0].File)
+	assert.Equal(t, uint32(43), lr.Locations[0].Offset)
+}
+
+func TestLookupAddressWithInlineInfo(t *testing.T) {
+	f, err := os.Open("testdata/inlineapp.gsym")
+	defer f.Close()
+	if assert.Nil(t, err) == false {
+		return
+	}
+
+	g, err := NewGsymWithReader(f)
+	if assert.Nil(t, err) == false {
+		return
+	}
+
+	lr, err := g.LookupTextRelativeAddress(0x32b3)
+	if assert.Nil(t, err) == false {
+		return
+	}
+
+	assert.Equal(t, uint64(0x32b3), lr.Address)
+	assert.Equal(t, uint64(0x3274), lr.StartAddr)
+	assert.Equal(t, uint64(0x40), lr.Size)
+	assert.Equal(t, "__45-[AppDelegate applicationDidFinishLaunching:]_block_invoke", lr.Name)
+
+	if assert.Equal(t, 1, len(lr.Locations)) == false {
+		return
+	}
+
+	assert.Equal(t, "__45-[AppDelegate applicationDidFinishLaunching:]_block_invoke", lr.Locations[0].Name)
+	assert.Equal(t, uint32(14), lr.Locations[0].Line)
+	assert.Equal(t, "/Users/matt/Desktop/InlineTest/InlineTest/AppDelegate.m", lr.Locations[0].File)
+	assert.Equal(t, uint32(63), lr.Locations[0].Offset)
 }
