@@ -2,6 +2,8 @@ github.com/chimehq/binarycursor v0.0.0-20211206184046-2fdafa05d0b8 h1:eNHl443ckh
 github.com/chimehq/binarycursor v0.0.0-20211206184046-2fdafa05d0b8/go.mod h1:STVzLFRRn2bz791yF6FvcvvQHLSUmYp4hM0T2I+uub0=
 github.com/chimehq/binarycursor v0.0.0-20211206200334-ee29925d10fe h1:3rKbgTo1M9zq53CvlJl+yt5eFLN3W62hN2odlhFZ9gQ=
 github.com/chimehq/binarycursor v0.0.0-20211206200334-ee29925d10fe/go.mod h1:STVzLFRRn2bz791yF6FvcvvQHLSUmYp4hM0T2I+uub0=
+github.com/chimehq/binarycursor v0.0.0-20211210163730-68cca695ffbc h1:ixT6rK1R+Jg8he8pid1iZy2eCbtH6MPmC4Rcjc3tHQk=
+github.com/chimehq/binarycursor v0.0.0-20211210163730-68cca695ffbc/go.mod h1:STVzLFRRn2bz791yF6FvcvvQHLSUmYp4hM0T2I+uub0=
 github.com/davecgh/go-spew v1.1.0 h1:ZDRjVQ15GmhC3fiQ8ni8+OwkZQO4DARzQgrnXU1Liz8=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
