@@ -1,8 +1,6 @@
 package gogsym
 
 import (
-	"fmt"
-
 	"github.com/chimehq/binarycursor"
 )
 
@@ -56,8 +54,9 @@ func (g Gsym) LookupTextRelativeAddress(relAddr uint64) (LookupResult, error) {
 
 	lr.Size = uint64(fnSize)
 
-	// check bounds
-	if relAddr < entryAddr || relAddr > entryAddr+uint64(fnSize) {
+	// check bounds, but only if the function has non-zero size
+	notContained := relAddr < entryAddr || relAddr > entryAddr+uint64(fnSize)
+	if notContained && fnSize > 0 {
 		return lr, ErrAddressNotFound
 	}
 
@@ -363,8 +362,6 @@ func (i inlineInfo) Contains(addr uint64) bool {
 	}
 
 	for _, r := range i.Ranges {
-		fmt.Printf("checking 0x%x in 0x%x:0x%x\n", addr, r.Start, r.Size)
-
 		if addr >= r.Start && addr <= r.End() {
 			return true
 		}
@@ -412,8 +409,6 @@ func decodeInlineInfo(c *binarycursor.BinaryCursor, startAddr uint64) (inlineInf
 	}
 
 	info.Line = uint32(line)
-
-	fmt.Printf("name: 0x%x, file: %d, line: %d\n", nameStrOffset, fileIndex, line)
 
 	childBaseAddr := ranges[0].Start // always relative to the parent address
 	for hasChildren == 1 {

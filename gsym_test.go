@@ -195,3 +195,35 @@ func TestLookupAddressInFunctionWithInlineInfo(t *testing.T) {
 	assert.Equal(t, "/Users/matt/Desktop/InlineTest/InlineTest/AppDelegate.m", loc.File)
 	assert.Equal(t, uint32(29), loc.Offset)
 }
+
+func TestLookupAddressInGSYMWithoutLineTables(t *testing.T) {
+	f, err := os.Open("testdata/CFNetwork.gsym")
+	defer f.Close()
+	if assert.Nil(t, err) == false {
+		return
+	}
+
+	g, err := NewGsymWithReader(f)
+	if assert.Nil(t, err) == false {
+		return
+	}
+
+	assert.Equal(t, uint64(0x180a4e000), g.Header.BaseAddress)
+	assert.Equal(t, "9c2d6e302482364380a345930c02edc0", g.Header.UUIDString())
+
+	// inside CFURLRequestCreate
+	lr, err := g.LookupAddress(0x0000000180ab303e)
+	if assert.Nil(t, err) == false {
+		return
+	}
+
+	if assert.Equal(t, 1, len(lr.Locations)) == false {
+		return
+	}
+
+	loc := lr.Locations[0]
+	assert.Equal(t, "CFURLRequestCreate", loc.Name)
+	assert.Equal(t, uint32(0), loc.Line)
+	assert.Equal(t, "", loc.File)
+	assert.Equal(t, uint32(2), loc.Offset)
+}
