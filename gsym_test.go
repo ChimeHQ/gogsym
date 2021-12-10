@@ -140,12 +140,58 @@ func TestLookupAddressWithInlineInfo(t *testing.T) {
 	assert.Equal(t, uint64(0x40), lr.Size)
 	assert.Equal(t, "__45-[AppDelegate applicationDidFinishLaunching:]_block_invoke", lr.Name)
 
+	if assert.Equal(t, 3, len(lr.Locations)) == false {
+		return
+	}
+
+	loc := lr.Locations[0]
+	assert.Equal(t, "functionB", loc.Name)
+	assert.Equal(t, uint32(14), loc.Line)
+	assert.Equal(t, "/Users/matt/Desktop/InlineTest/InlineTest/AppDelegate.m", loc.File)
+	assert.Equal(t, uint32(31), loc.Offset)
+
+	loc = lr.Locations[1]
+	assert.Equal(t, "functionA", loc.Name)
+	assert.Equal(t, uint32(18), loc.Line)
+	assert.Equal(t, "/Users/matt/Desktop/InlineTest/InlineTest/AppDelegate.m", loc.File)
+	assert.Equal(t, uint32(31), loc.Offset)
+
+	loc = lr.Locations[2]
+	assert.Equal(t, "__45-[AppDelegate applicationDidFinishLaunching:]_block_invoke", loc.Name)
+	assert.Equal(t, uint32(33), loc.Line)
+	assert.Equal(t, "/Users/matt/Desktop/InlineTest/InlineTest/AppDelegate.m", loc.File)
+	assert.Equal(t, uint32(63), loc.Offset)
+}
+
+func TestLookupAddressInFunctionWithInlineInfo(t *testing.T) {
+	f, err := os.Open("testdata/inlineapp.gsym")
+	defer f.Close()
+	if assert.Nil(t, err) == false {
+		return
+	}
+
+	g, err := NewGsymWithReader(f)
+	if assert.Nil(t, err) == false {
+		return
+	}
+
+	lr, err := g.LookupTextRelativeAddress(0x3291)
+	if assert.Nil(t, err) == false {
+		return
+	}
+
+	assert.Equal(t, uint64(0x3291), lr.Address)
+	assert.Equal(t, uint64(0x3274), lr.StartAddr)
+	assert.Equal(t, uint64(0x40), lr.Size)
+	assert.Equal(t, "__45-[AppDelegate applicationDidFinishLaunching:]_block_invoke", lr.Name)
+
 	if assert.Equal(t, 1, len(lr.Locations)) == false {
 		return
 	}
 
-	assert.Equal(t, "__45-[AppDelegate applicationDidFinishLaunching:]_block_invoke", lr.Locations[0].Name)
-	assert.Equal(t, uint32(14), lr.Locations[0].Line)
-	assert.Equal(t, "/Users/matt/Desktop/InlineTest/InlineTest/AppDelegate.m", lr.Locations[0].File)
-	assert.Equal(t, uint32(63), lr.Locations[0].Offset)
+	loc := lr.Locations[0]
+	assert.Equal(t, "__45-[AppDelegate applicationDidFinishLaunching:]_block_invoke", loc.Name)
+	assert.Equal(t, uint32(31), loc.Line)
+	assert.Equal(t, "/Users/matt/Desktop/InlineTest/InlineTest/AppDelegate.m", loc.File)
+	assert.Equal(t, uint32(29), loc.Offset)
 }

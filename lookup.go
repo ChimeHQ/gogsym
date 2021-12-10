@@ -21,6 +21,10 @@ type LookupResult struct {
 	Locations []SourceLocation
 }
 
+func (g Gsym) LookupAddress(addr uint64) (LookupResult, error) {
+	return g.LookupTextRelativeAddress(addr - g.Header.BaseAddress)
+}
+
 func (g Gsym) LookupTextRelativeAddress(relAddr uint64) (LookupResult, error) {
 	lr := LookupResult{
 		Address: relAddr,
@@ -74,21 +78,46 @@ func (g Gsym) LookupTextRelativeAddress(relAddr uint64) (LookupResult, error) {
 		return lr, err
 	}
 
-	fmt.Printf("looking up %d\n", lineInfo.entry.FileIndex)
-
 	path, err := g.GetFile(lineInfo.entry.FileIndex)
 	if err != nil {
 		path = ""
 	}
 
-	loc := SourceLocation{
+	entryLoc := SourceLocation{
 		Name:   name,
 		Line:   lineInfo.entry.Line,
 		Offset: uint32(relAddr - entryAddr),
 		File:   path,
 	}
 
-	lr.Locations = append(lr.Locations, loc)
+	lr.Locations = []SourceLocation{entryLoc}
+
+	inlineLocs, err := g.locationsForInlineInfo(lineInfo.inline, relAddr)
+	if err != nil {
+		return lr, err
+	}
+
+	if len(inlineLocs) == 0 {
+		return lr, err
+	}
+
+	lr.Locations = []SourceLocation{}
+
+	// ok, this is really annoying. The inline info
+	// modifies the previous information. So, we have
+	// to keep track and change as we go. Also, of course,
+	// the array is in the reverse order.
+	for i := len(inlineLocs) - 1; i >= 0; i-- {
+		loc := inlineLocs[i]
+		adjustedLoc := loc
+
+		adjustedLoc.Line = entryLoc.Line
+		adjustedLoc.File = entryLoc.File
+
+		entryLoc = loc
+
+		lr.Locations = append(lr.Locations, adjustedLoc)
+	}
 
 	return lr, err
 }
@@ -102,8 +131,8 @@ const (
 )
 
 type lineInfoResult struct {
-	entry            LineEntry
-	inlineDataOffset uint64
+	entry  LineEntry
+	inline inlineInfo
 }
 
 func (g Gsym) lookupLineInfo(c binarycursor.BinaryCursor, startAddr uint64, addr uint64) (lineInfoResult, error) {
@@ -117,27 +146,66 @@ func (g Gsym) lookupLineInfo(c binarycursor.BinaryCursor, startAddr uint64, addr
 			return result, err
 		}
 
-		infoLength, err := c.ReadUint32()
+		_, err = c.ReadUint32()
 		if err != nil {
 			return result, err
 		}
-
-		fmt.Printf("0x%x => 0x%x 0x%x\n", addr, infoType, infoLength)
 
 		switch InfoType(infoType) {
 		case InfoTypeEndOfList:
 			done = true
 		case InfoTypeLineTable:
-			result.entry, err = g.lookupLineTable(&c, startAddr, addr)
+			result.entry, err = lookupLineTable(&c, startAddr, addr)
 			if err != nil {
 				return result, err
 			}
 		case InfoTypeInline:
-			fmt.Print("found inline info\n")
+			result.inline, err = decodeInlineInfo(&c, startAddr)
+			if err != nil {
+				return result, err
+			}
 		}
 	}
 
 	return result, nil
+}
+
+func (g Gsym) locationsForInlineInfo(info inlineInfo, addr uint64) ([]SourceLocation, error) {
+	locations := []SourceLocation{}
+
+	if info.Contains(addr) == false {
+		return locations, nil
+	}
+
+	name, err := g.GetString(int64(info.NameOffset))
+	if err != nil {
+		return locations, err
+	}
+
+	file, err := g.GetFile(info.FileIndex)
+	if err != nil {
+		return locations, err
+	}
+
+	loc := SourceLocation{
+		Name:   name,
+		File:   file,
+		Line:   info.Line,
+		Offset: uint32(addr - info.Ranges[0].Start),
+	}
+
+	locations = append(locations, loc)
+
+	for _, child := range info.Children {
+		sublocs, err := g.locationsForInlineInfo(child, addr)
+		if err != nil {
+			return locations, err
+		}
+
+		locations = append(locations, sublocs...)
+	}
+
+	return locations, nil
 }
 
 type LineEntry struct {
@@ -156,7 +224,7 @@ const (
 	LineTableOpFirstSpecial LineTableOpCode = 0x04
 )
 
-func (g Gsym) lookupLineTable(c *binarycursor.BinaryCursor, startAddr uint64, addr uint64) (LineEntry, error) {
+func lookupLineTable(c *binarycursor.BinaryCursor, startAddr uint64, addr uint64) (LineEntry, error) {
 	entry := LineEntry{
 		Address: startAddr,
 	}
@@ -182,7 +250,6 @@ func (g Gsym) lookupLineTable(c *binarycursor.BinaryCursor, startAddr uint64, ad
 
 	nextEntry := entry
 
-	fmt.Printf("line range is: %d\n", lineRange)
 	done := false
 
 	for done == false {
@@ -190,8 +257,6 @@ func (g Gsym) lookupLineTable(c *binarycursor.BinaryCursor, startAddr uint64, ad
 		if err != nil {
 			return entry, err
 		}
-
-		fmt.Printf("op: 0x%x\n", op)
 
 		switch LineTableOpCode(op) {
 		case LineTableOpEndSequence:
@@ -227,8 +292,6 @@ func (g Gsym) lookupLineTable(c *binarycursor.BinaryCursor, startAddr uint64, ad
 			nextEntry.Address += uint64(addrDelta)
 		}
 
-		fmt.Printf("entry is now: 0x%x => %d:%d\n", entry.Address, entry.FileIndex, entry.Line)
-
 		if nextEntry.Address > addr {
 			return entry, nil
 		}
@@ -238,4 +301,133 @@ func (g Gsym) lookupLineTable(c *binarycursor.BinaryCursor, startAddr uint64, ad
 
 	// if we get to the end, return the last entry
 	return entry, nil
+}
+
+type addressRange struct {
+	Start uint64
+	Size  uint64
+}
+
+func (r addressRange) End() uint64 {
+	return r.Start + r.Size
+}
+
+func decodeAddressRanges(c *binarycursor.BinaryCursor, baseAddr uint64) ([]addressRange, error) {
+	ranges := []addressRange{}
+
+	length, err := c.ReadUleb128()
+	if err != nil {
+		return ranges, err
+	}
+
+	for i := 0; i < int(length); i++ {
+		r := addressRange{}
+
+		v, err := c.ReadUleb128()
+		if err != nil {
+			return ranges, err
+		}
+
+		r.Start = v + baseAddr
+
+		v, err = c.ReadUleb128()
+		if err != nil {
+			return ranges, err
+		}
+
+		r.Size = v
+
+		ranges = append(ranges, r)
+	}
+
+	return ranges, nil
+}
+
+type inlineInfo struct {
+	NameOffset uint32
+	FileIndex  uint32
+	Line       uint32
+	Offset     uint64
+	Ranges     []addressRange
+	Children   []inlineInfo
+}
+
+func (i inlineInfo) Ending() bool {
+	// the tree terminates with empty ranges
+	return len(i.Ranges) == 0
+}
+
+func (i inlineInfo) Contains(addr uint64) bool {
+	if len(i.Ranges) == 0 {
+		return false
+	}
+
+	for _, r := range i.Ranges {
+		fmt.Printf("checking 0x%x in 0x%x:0x%x\n", addr, r.Start, r.Size)
+
+		if addr >= r.Start && addr <= r.End() {
+			return true
+		}
+	}
+
+	return false
+}
+
+func decodeInlineInfo(c *binarycursor.BinaryCursor, startAddr uint64) (inlineInfo, error) {
+	info := inlineInfo{}
+
+	ranges, err := decodeAddressRanges(c, startAddr)
+	if err != nil {
+		return info, err
+	}
+
+	info.Ranges = ranges
+
+	if info.Ending() {
+		return info, nil
+	}
+
+	hasChildren, err := c.ReadUint8()
+	if err != nil {
+		return info, err
+	}
+
+	nameStrOffset, err := c.ReadUint32()
+	if err != nil {
+		return info, err
+	}
+
+	info.NameOffset = nameStrOffset
+
+	fileIndex, err := c.ReadUleb128()
+	if err != nil {
+		return info, err
+	}
+
+	info.FileIndex = uint32(fileIndex)
+
+	line, err := c.ReadUleb128()
+	if err != nil {
+		return info, err
+	}
+
+	info.Line = uint32(line)
+
+	fmt.Printf("name: 0x%x, file: %d, line: %d\n", nameStrOffset, fileIndex, line)
+
+	childBaseAddr := ranges[0].Start // always relative to the parent address
+	for hasChildren == 1 {
+		child, err := decodeInlineInfo(c, childBaseAddr)
+		if err != nil {
+			return info, err
+		}
+
+		if child.Ending() {
+			break
+		}
+
+		info.Children = append(info.Children, child)
+	}
+
+	return info, nil
 }
